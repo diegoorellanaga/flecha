@@ -1,15 +1,17 @@
 // assets.js — Mapa y decoración de "Resiste a los ragdolls".
-// Solo visual (sin lógica de juego). RNG propio con semilla fija: el mapa es igual para todos.
+// Solo visual (más la princesa Antonita, que reacciona a los flechazos).
+// RNG propio con semilla fija: el mapa es igual para todos.
 window.MAPA = (() => {
   const CFG = {
-    puertasZ: [-9, -3, 3, 9],   // 4 puertas en la pared izquierda
+    puertasZ: [-9, -3, 3, 9],
     xPuertas: -15,
     xMeta: 13.5,
     cielo: "#8cc8f5",
-    castillo: { x: 21, z: 0 }  // castillo detrás de la meta
+    castillo: { x: 21, z: 0 },
+    princesa: { dz: -2.65, escala: 1.35 }  // sobre la muralla (entre dos almenas), a un lado del portón
   };
 
-  function rng(seed) {   // mulberry32
+  function rng(seed) {
     return () => {
       seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
       let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -116,16 +118,13 @@ window.MAPA = (() => {
     });
     txPiedra.uScale = 6; txPiedra.vScale = 1.5;
     const mPiedra = mat("mPiedra", "#ffffff", { diffuseTexture: txPiedra });
-    // pared0: fondo (z=+15) · pared1: frente (z=-15) · pared2: derecha · pared3: izquierda (puertas)
     ["pared0", "pared2", "pared3"].forEach(nm => { const p = scene.getMeshByName(nm); if (p) p.material = mPiedra; });
 
-    // La pared del frente (la más cercana a la cámara) se elimina: tapaba la vista y frenaba las flechas
     const frente = scene.getMeshByName("pared1");
     if (frente) {
       if (frente.physicsBody) { frente.physicsBody.shape?.dispose(); frente.physicsBody.dispose(); }
       frente.dispose();
     }
-    // En su lugar, un borde bajo de piedra solo decorativo (sin física)
     const borde = B.MeshBuilder.CreateBox("bordeFrente", { width: 30.5, height: 0.35, depth: 0.4 }, scene);
     borde.position.set(0, 0.17, -15.1); borde.material = mPiedra; fijo(borde);
 
@@ -153,7 +152,7 @@ window.MAPA = (() => {
       return { x: CFG.xPuertas + 0.8, z, mat: mP, brillo: 0 };
     });
 
-    // ---------- Meta: franja a cuadros + banderas ----------
+    // ---------- Meta ----------
     const meta = B.MeshBuilder.CreateGround("meta", { width: 0.8, height: 30 }, scene);
     meta.position.set(CFG.xMeta, 0.02, 0); meta.isPickable = false;
     const txMeta = texturaCanvas(scene, B, "txMeta", 32, 512, (ctx, w, h) => {
@@ -174,8 +173,10 @@ window.MAPA = (() => {
       b.position.set(CFG.xMeta + 0.6, 3.6, z); b.material = mBandera; fijo(b);
     });
 
-    // ---------- Castillo detrás de la meta (lo que defiendes) ----------
+    // ---------- Castillo + princesa ----------
     crearCastillo(scene, B, mat, fijo, mPiedra, CFG.castillo.x, CFG.castillo.z);
+    const antonita = crearPrincesa(scene, B, mat, texturaCanvas,
+      V(CFG.castillo.x - 2.5, 5.0, CFG.castillo.z + CFG.princesa.dz), CFG.princesa.escala);
 
     // ---------- Árboles y rocas ----------
     const mTronco = mat("mTronco", "#6b4a2b"), mHoja = mat("mHoja", "#2f7a3a"), mHoja2 = mat("mHoja2", "#3d8f45");
@@ -188,9 +189,9 @@ window.MAPA = (() => {
     for (const base of [tronco, copa1, copa2, roca]) { base.isVisible = false; base.isPickable = false; }
 
     const libre = (x, z, margen) =>
-      (Math.abs(x) < 17 + margen && Math.abs(z) < 17 + margen) ||          // arena
-      (z < -16 && Math.abs(x) < 30 && z > -34) ||                          // delante de la cámara
-      (x > 15 && x < 31 && Math.abs(z) < 15);                              // castillo
+      (Math.abs(x) < 17 + margen && Math.abs(z) < 17 + margen) ||
+      (z < -16 && Math.abs(x) < 30 && z > -34) ||
+      (x > 15 && x < 31 && Math.abs(z) < 15);
     let puestos = 0, intentos = 0;
     while (puestos < 55 && intentos++ < 2000) {
       const x = (r() * 2 - 1) * 60, z = (r() * 2 - 1) * 60;
@@ -215,6 +216,7 @@ window.MAPA = (() => {
     return {
       puertas,
       metaMat,
+      antonita,
       brillarPuerta(i) { puertas[i].brillo = 1; },
       actualizar(dt) {
         for (const p of puertas) {
@@ -222,6 +224,7 @@ window.MAPA = (() => {
           p.brillo = Math.max(0, p.brillo - dt * 2.5);
           p.mat.emissiveColor = B.Color3.Lerp(base, luz, p.brillo);
         }
+        antonita.actualizar(dt);
       }
     };
   }
@@ -247,7 +250,6 @@ window.MAPA = (() => {
       const anillo = B.MeshBuilder.CreateCylinder("anillo", { height: 0.4, diameter: radio * 2 + 0.5, tessellation: 16 }, scene);
       anillo.position.set(x, alto + 0.2, z); anillo.material = mPiedra; fijo(anillo);
       almenas(x, alto + 0.4, z, radio + 0.1, Math.round(radio * 4));
-      // ventanas encendidas mirando a la arena
       for (let h = 2.5; h < alto - 1; h += 2.5) {
         const v = B.MeshBuilder.CreatePlane("ventana", { width: 0.45, height: 0.8 }, scene);
         v.position.set(x - radio - 0.01, h, z); v.rotation.y = Math.PI / 2; v.material = mVentana; fijo(v);
@@ -260,7 +262,6 @@ window.MAPA = (() => {
       return alto + 1.1;
     };
 
-    // Muralla con almenas entre las torres laterales
     const largo = 16;
     const muro = B.MeshBuilder.CreateBox("muralla", { width: 1.2, height: 5, depth: largo }, scene);
     muro.position.set(cx - 2.5, 2.5, cz); muro.material = mPiedra; fijo(muro);
@@ -268,7 +269,6 @@ window.MAPA = (() => {
       const b = B.MeshBuilder.CreateBox("almenaMuro", { width: 1.3, height: 0.7, depth: 0.55 }, scene);
       b.position.set(cx - 2.5, 5.35, cz + z); b.material = mPiedra; fijo(b);
     }
-    // Portón con arco
     const porton = B.MeshBuilder.CreatePlane("porton", { width: 2.6, height: 3.2 }, scene);
     porton.position.set(cx - 3.11, 1.6, cz); porton.rotation.y = Math.PI / 2; porton.material = mOscuro; fijo(porton);
     const arco = B.MeshBuilder.CreateCylinder("arco", { height: 0.05, diameter: 2.6, tessellation: 16, arc: 0.5 }, scene);
@@ -276,13 +276,127 @@ window.MAPA = (() => {
 
     torre(cx - 2.5, cz - largo / 2, 1.6, 7);
     torre(cx - 2.5, cz + largo / 2, 1.6, 7);
-    const cima = torre(cx + 1.5, cz, 2.6, 12);            // torre del homenaje
+    const cima = torre(cx + 1.5, cz, 2.6, 12);
 
-    // Bandera en lo alto
     const mastil = B.MeshBuilder.CreateCylinder("mastilC", { height: 2.5, diameter: 0.1 }, scene);
     mastil.position.set(cx + 1.5, cima + 1.2, cz); mastil.material = mat("mMastilC", "#dddddd"); fijo(mastil);
     const bandera = B.MeshBuilder.CreatePlane("banderaC", { width: 1.6, height: 0.9 }, scene);
     bandera.position.set(cx + 1.5 - 0.8, cima + 2, cz); bandera.material = mBanderaC; fijo(bandera);
+  }
+
+  // ---------- Princesa Antonita ----------
+  // Mira hacia la arena (-x). Pide ayuda agitando los brazos; si le llega una flecha dice "Nuuuu".
+  function crearPrincesa(scene, B, mat, texturaCanvas, pos, esc) {
+    const raiz = new B.TransformNode("antonita", scene);
+    raiz.position.copyFrom(pos);
+    raiz.scaling.setAll(esc);
+    const pieza = (m, x, y, z, material) => {
+      m.parent = raiz; m.position.set(x, y, z); m.material = material; m.isPickable = false; return m;
+    };
+    const mVestido = mat("mVestido", "#ff7eb9"), mVestido2 = mat("mVestido2", "#ffb3d6");
+    const mPiel = mat("mPielP", "#f6cfa8"), mPelo = mat("mPelo", "#ffd84a");
+    const mOro = mat("mOro", "#ffc81e", { emissiveColor: new B.Color3(0.35, 0.25, 0) });
+    const mOjo = mat("mOjo", "#222222"), mBoca = mat("mBoca", "#d04060");
+    const MB = B.MeshBuilder;
+
+    // Vestido acampanado + volado
+    pieza(MB.CreateCylinder("falda", { height: 0.9, diameterTop: 0.34, diameterBottom: 0.95, tessellation: 16 }, scene), 0, 0.45, 0, mVestido);
+    pieza(MB.CreateTorus("volado", { diameter: 0.9, thickness: 0.08, tessellation: 16 }, scene), 0, 0.05, 0, mVestido2);
+    pieza(MB.CreateCylinder("cintura", { height: 0.06, diameter: 0.36 }, scene), 0, 0.88, 0, mOro);
+    pieza(MB.CreateCylinder("torsoP", { height: 0.42, diameterTop: 0.3, diameterBottom: 0.26 }, scene), 0, 1.1, 0, mVestido2);
+    // Cabeza, pelo largo, corona
+    pieza(MB.CreateSphere("cabezaP", { diameter: 0.34, segments: 12 }, scene), 0, 1.5, 0, mPiel);
+    pieza(MB.CreateSphere("peloP", { diameter: 0.38, segments: 12 }, scene), 0.05, 1.54, 0, mPelo);
+    pieza(MB.CreateBox("melena", { width: 0.12, height: 0.5, depth: 0.34 }, scene), 0.14, 1.3, 0, mPelo);
+    pieza(MB.CreateCylinder("corona", { height: 0.1, diameterTop: 0.24, diameterBottom: 0.18, tessellation: 8 }, scene), 0, 1.72, 0, mOro);
+    [-0.07, 0, 0.07].forEach(z => pieza(MB.CreateCylinder("pico", { height: 0.08, diameterTop: 0, diameterBottom: 0.05, tessellation: 4 }, scene), 0, 1.8, z, mOro));
+    // Cara (mirando a -x)
+    [-0.06, 0.06].forEach(z => pieza(MB.CreateSphere("ojo", { diameter: 0.04, segments: 4 }, scene), -0.16, 1.53, z, mOjo));
+    const boca = pieza(MB.CreateSphere("boca", { diameter: 0.05, segments: 4 }, scene), -0.165, 1.44, 0, mBoca);
+
+    // Brazos con pivote en el hombro
+    const brazo = lado => {
+      const piv = new B.TransformNode("hombro", scene);
+      piv.parent = raiz; piv.position.set(0, 1.27, lado * 0.17);
+      const b = MB.CreateCylinder("brazoP", { height: 0.42, diameter: 0.08 }, scene);
+      b.parent = piv; b.position.y = -0.21; b.material = mPiel; b.isPickable = false;
+      const mano = MB.CreateSphere("mano", { diameter: 0.1, segments: 4 }, scene);
+      mano.parent = piv; mano.position.y = -0.43; mano.material = mPiel; mano.isPickable = false;
+      return piv;
+    };
+    const bIzq = brazo(1), bDer = brazo(-1);
+
+    // Globo de texto (billboard) con dos versiones: "Help!" y "Nuuuu"
+    const globoTx = (nombre, texto, color) => texturaCanvas(scene, B, nombre, 512, 300, (ctx, w, h) => {
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "#333"; ctx.lineWidth = 8;
+      const rr = 60, x0 = 12, y0 = 12, x1 = w - 12, y1 = h - 80;
+      ctx.beginPath();
+      ctx.moveTo(x0 + rr, y0); ctx.lineTo(x1 - rr, y0); ctx.quadraticCurveTo(x1, y0, x1, y0 + rr);
+      ctx.lineTo(x1, y1 - rr); ctx.quadraticCurveTo(x1, y1, x1 - rr, y1);
+      ctx.lineTo(w / 2 + 40, y1); ctx.lineTo(w / 2, h - 14); ctx.lineTo(w / 2 - 20, y1);   // colita
+      ctx.lineTo(x0 + rr, y1); ctx.quadraticCurveTo(x0, y1, x0, y1 - rr);
+      ctx.lineTo(x0, y0 + rr); ctx.quadraticCurveTo(x0, y0, x0 + rr, y0);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = color; ctx.font = "bold 110px Comic Sans MS, system-ui, sans-serif";
+      ctx.fillText(texto, w / 2, 105);
+      ctx.fillStyle = "#c0407a"; ctx.font = "bold 40px system-ui, sans-serif";
+      ctx.fillText("👑 Antonita", w / 2, 180);
+    });
+    const txHelp = globoTx("txHelp", "Help!", "#1a1a1a");
+    const txNuu = globoTx("txNuu", "Nuuuu", "#d01818");
+    [txHelp, txNuu].forEach(t => { t.hasAlpha = true; });
+    const mGlobo = new B.StandardMaterial("mGlobo", scene);
+    mGlobo.diffuseTexture = txHelp; mGlobo.emissiveTexture = txHelp;
+    mGlobo.useAlphaFromDiffuseTexture = true; mGlobo.disableLighting = true; mGlobo.backFaceCulling = false;
+    mGlobo.fogEnabled = false;
+    const globo = MB.CreatePlane("globo", { width: 1.7, height: 1.0 }, scene);
+    globo.parent = raiz; globo.position.set(0, 2.55, 0); globo.material = mGlobo;
+    globo.billboardMode = B.Mesh.BILLBOARDMODE_ALL; globo.isPickable = false;
+
+    // Colisionador invisible para detectar flechazos (estático: la flecha se queda clavada en ella)
+    const caja = MB.CreateBox("antonitaHit", { width: 0.9 * esc, height: 1.9 * esc, depth: 0.9 * esc }, scene);
+    caja.position.set(pos.x, pos.y + 0.95 * esc, pos.z); caja.isVisible = false; caja.isPickable = false;
+    const agg = new B.PhysicsAggregate(caja, B.PhysicsShapeType.BOX, { mass: 0 }, scene);
+
+    let t = 0, nuu = 0, ultimo = -1;
+    function golpe() {
+      if (t - ultimo < 0.25) return;            // evita repetir por el mismo impacto
+      ultimo = t; nuu = 1.8;
+      mGlobo.diffuseTexture = txNuu; mGlobo.emissiveTexture = txNuu;
+    }
+    const plugin = scene.getPhysicsEngine && scene.getPhysicsEngine()?.getPhysicsPlugin();
+    const esMio = ev => ev.collider === agg.body || ev.collidedAgainst === agg.body;
+    if (plugin && plugin.onCollisionObservable) plugin.onCollisionObservable.add(ev => { if (esMio(ev)) golpe(); });
+    else { agg.body.setCollisionCallbackEnabled(true); agg.body.getCollisionObservable().add(golpe); }
+
+    function actualizar(dt) {
+      t += dt;
+      if (nuu > 0) {
+        // asustada: se encoge, tiembla y se tapa la cara
+        nuu -= dt;
+        raiz.position.y = pos.y + Math.abs(Math.sin(t * 18)) * 0.05;
+        raiz.rotation.y = Math.sin(t * 40) * 0.12;
+        bIzq.rotation.x = -2.2; bDer.rotation.x = 2.2;
+        bIzq.rotation.z = bDer.rotation.z = 0.9;
+        boca.scaling.set(1, 2.2, 1.6);
+        globo.scaling.setAll(1.15 + Math.sin(t * 30) * 0.05);
+        if (nuu <= 0) { mGlobo.diffuseTexture = txHelp; mGlobo.emissiveTexture = txHelp; }
+        return;
+      }
+      // pidiendo ayuda: saltitos y brazos en alto agitándose
+      raiz.position.y = pos.y + Math.abs(Math.sin(t * 4)) * 0.12;
+      raiz.rotation.y = Math.sin(t * 1.5) * 0.25;
+      raiz.rotation.x = Math.sin(t * 4) * 0.04;
+      bIzq.rotation.z = bDer.rotation.z = 0;
+      bIzq.rotation.x = -(2.5 + 0.45 * Math.sin(t * 9));
+      bDer.rotation.x = 2.5 + 0.45 * Math.sin(t * 9 + Math.PI);
+      boca.scaling.set(1, 1 + 0.5 * Math.abs(Math.sin(t * 6)), 1);
+      globo.scaling.setAll(1 + Math.sin(t * 3) * 0.04);
+    }
+
+    return { actualizar, golpe, raiz };
   }
 
   return { CFG, crear };

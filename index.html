@@ -79,8 +79,11 @@
     catch (e2) { Navigator.prototype.getGamepads = () => []; }
   }
 </script>
-<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@babylonjs/havok@1.3.10/lib/umd/HavokPhysics_umd.js"></script>
+<!-- Librerías: primero la copia local (misma carpeta); si no está, desde el CDN -->
+<script src="babylon.js"></script>
+<script>window.BABYLON || document.write('<script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.js"><\/script>');</script>
+<script src="HavokPhysics_umd.js"></script>
+<script>window.HavokPhysics || document.write('<script src="https://cdn.jsdelivr.net/npm/@babylonjs/havok@1.3.10/lib/umd/HavokPhysics_umd.js"><\/script>');</script>
 <script src="assets.js"></script>
 <script src="poderes.js"></script>
 <script src="sonido.js"></script>
@@ -140,10 +143,16 @@ window.addEventListener("error", e => msg("Error: " + e.message));
 
   let havok;
   try {
-    // El motor de física (WASM, ~2 MB) se descarga del CDN en vez de ir incrustado en este archivo
-    havok = await HavokPhysics({
-      locateFile: () => "https://cdn.jsdelivr.net/npm/@babylonjs/havok@1.3.10/lib/umd/HavokPhysics.wasm"
-    });
+    // Física: primero HavokPhysics.wasm local (misma carpeta); si no se puede, desde el CDN
+    const WASM_LOCAL = "HavokPhysics.wasm";
+    const WASM_CDN = "https://cdn.jsdelivr.net/npm/@babylonjs/havok@1.3.10/lib/umd/HavokPhysics.wasm";
+    try {
+      const r = await fetch(WASM_LOCAL);
+      if (!r.ok) throw new Error("sin wasm local");
+      havok = await HavokPhysics({ wasmBinary: await r.arrayBuffer() });
+    } catch (e1) {
+      havok = await HavokPhysics({ locateFile: () => WASM_CDN });
+    }
   } catch (e) { msg("No se pudo iniciar la física: " + e.message); return; }
   scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.HavokPlugin(true, havok));
 

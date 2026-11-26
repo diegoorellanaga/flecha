@@ -23,6 +23,8 @@
   #vFlecha { font-size: 34px; line-height: 40px; color: #fff; transition: transform .3s, opacity .3s;
              display: inline-block; }
   #vBarras { letter-spacing: 1px; color: #ffd166; }
+  #sonido { top: calc(150px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+            font-size: 20px; border: 0; cursor: pointer; touch-action: manipulation; }
   #aviso { top: calc(60px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
            display: none; font-size: 17px; border: 2px solid #ffd166; max-width: 80vw; text-align: center; }
   #aviso b { color: #ffd166; }
@@ -53,6 +55,7 @@
     #panel small { max-width: 55vw; display: block; }
     #viento { min-width: 60px; }
     #vFlecha { font-size: 26px; line-height: 30px; }
+    #sonido { top: calc(118px + env(safe-area-inset-top, 0px)); font-size: 18px; }
     #aviso { font-size: 13px; top: calc(48px + env(safe-area-inset-top, 0px)); }
     #poderes { top: calc(46px + env(safe-area-inset-top, 0px)); }
     #poderes .chip { font-size: 11px; padding: 3px 8px; }
@@ -80,6 +83,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@babylonjs/havok@1.3.10/lib/umd/HavokPhysics_umd.js"></script>
 <script src="assets.js"></script>
 <script src="poderes.js"></script>
+<script src="sonido.js"></script>
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -97,6 +101,7 @@
   <div id="vBarras">▯▯▯▯▯</div>
   <div id="vFuerza">Calma</div>
 </div>
+<button id="sonido" class="hud" title="Sonido">🔊</button>
 <div id="aviso" class="hud"></div>
 <div id="poderes"></div>
 <div id="jefe" class="hud"></div>
@@ -194,7 +199,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     velIni: 1.8, velPorSeg: 0.012, velMax: 6.5,
     spawnIni: 3.0, spawnMin: 0.7, spawnPorSeg: 0.011,
     caosDesde: 40, caosHasta: 220,
-    jefePrimero: 90, jefeCada: 120                       // segundos
+    jefePrimero: 90, jefeCada: 120
   };
   const velocidadEn = t => Math.min(DIF.velMax, DIF.velIni + DIF.velPorSeg * t);
   const intervaloEn = t => Math.max(DIF.spawnMin, DIF.spawnIni - DIF.spawnPorSeg * t);
@@ -209,19 +214,29 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   window.addEventListener("resize", encuadrar);
   window.addEventListener("orientationchange", () => setTimeout(() => { engine.resize(); encuadrar(); }, 200));
 
-  // ---------- Mapa (assets.js) y poderes (poderes.js) ----------
+  // ---------- Mapa (assets.js), poderes (poderes.js) y sonido (sonido.js) ----------
   if (!window.MAPA) { msg("Falta assets.js junto a index.html"); return; }
   if (!window.PODERES) { msg("Falta poderes.js junto a index.html"); return; }
+  // Si falta sonido.js el juego funciona igual, en silencio
+  const S = window.SONIDO || new Proxy({}, { get: () => () => {} });
   const mapa = MAPA.crear(scene, BABYLON);
   const metaMat = mapa.metaMat;
+
+  const btnSonido = document.getElementById("sonido");
+  const pintarSonido = () => { btnSonido.textContent = S.mudo ? "🔇" : "🔊"; };
+  if (window.SONIDO) {
+    pintarSonido();
+    btnSonido.addEventListener("pointerdown", e => e.stopPropagation());
+    btnSonido.addEventListener("click", () => { S.alternar(); pintarSonido(); });
+  } else btnSonido.style.display = "none";
 
   // ---------- Tipos de ragdoll (desde = segundos de partida) ----------
   const TIPOS = {
     normal:   { nombre: "Normal",   esc: 1.0,  vel: 1.0, vidas: 1, puntos: 1,  desde: 0,   peso: 10 },
-    veloz:    { nombre: "Veloz",    esc: 0.8,  vel: 1.6, vidas: 1, puntos: 2,  desde: 25,  peso: 4,
-                color: [1, 0.85, 0.1], desc: "corre 60% más rápido" },
+    veloz:    { nombre: "Veloz",    esc: 0.8,  vel: 2.0, vidas: 1, puntos: 2,  desde: 25,  peso: 4,
+                color: [1, 0.85, 0.1], desc: "corre el doble de rápido" },
     dorado:   { nombre: "Dorado",   esc: 0.7,  vel: 1.9, vidas: 1, puntos: 10, desde: 45,  peso: 0.6,
-                color: [1, 0.75, 0.1], brillo: [0.5, 0.35, 0], caos: 1, desc: "raro, rapidísimo y errático: vale 10" },
+                color: [1, 0.75, 0.1], brillo: [0.5, 0.35, 0], caos: 1, desc: "raro y errático: vale 10 y da +2 flechas" },
     tanque:   { nombre: "Tanque",   esc: 1.35, vel: 0.65, vidas: 3, puntos: 3, desde: 60,  peso: 3,
                 color: [0.4, 0.4, 0.45], desc: "aguanta 3 flechazos (o 1 con potencia ≥ 85)" },
     mitosis:  { nombre: "Mitosis",  esc: 1.1,  vel: 0.9, vidas: 1, puntos: 1,  desde: 80,  peso: 3,
@@ -285,6 +300,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     mapa.brillarPuerta(ip);
     crearCorredor("jefe", { x: p.x + 0.6, z: p.z, rng: crearRng(Math.floor(rngJefe() * 4294967296)) });
     aviso("⚠️ <b>¡Llega un JEFE!</b> 5 flechazos para derribarlo · si cruza cuenta como 5", 4);
+    S.jefe();
   }
 
   function crearCorredor(tipoId, op) {
@@ -350,7 +366,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
       banda.material = matColor([0.9, 0.1, 0.1]); mats.push(banda.material);
       banda.parent = cabeza.transformNode; banda.position.y = 0.06 * e; banda.isPickable = false;
     }
-    if (T.jefe) {   // corona dorada
+    if (T.jefe) {
       const corona = BABYLON.MeshBuilder.CreateCylinder("corona",
         { height: 0.18 * e, diameterTop: 0.42 * e, diameterBottom: 0.34 * e, tessellation: 8 }, scene);
       corona.material = matColor([1, 0.8, 0.1], [0.4, 0.3, 0]); mats.push(corona.material);
@@ -399,6 +415,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
 
   function finJuego() {
     jugando = false;
+    S.tensarFin(); S.fin();
     document.getElementById("finTxt").innerHTML =
       "Pasaron " + MAX_PASAN + " ragdolls la meta.<br>Eliminaste <b>" + aplastados + "</b> · " +
       puntos + " puntos · " + jefesMuertos + " jefe" + (jefesMuertos === 1 ? "" : "s") +
@@ -557,7 +574,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   let flashMeta = 0;
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
-    const dtR = dt * PODERES.factorRagdolls();          // cámara lenta solo para los ragdolls
+    const dtR = dt * PODERES.factorRagdolls();
     mapa.actualizar(dt);
     PODERES.actualizar(dt);
     if (avisoT > 0 && (avisoT -= dt) <= 0) avisoEl.style.display = "none";
@@ -586,7 +603,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
         if (c.x > X_META) {
           borrar(c);
           if (jugando) {
-            pasaron += c.T.cuentaPasar || 1; flashMeta = 0.25; hud();
+            pasaron += c.T.cuentaPasar || 1; flashMeta = 0.25; S.meta(); hud();
             if (pasaron >= MAX_PASAN) finJuego();
           }
         }
@@ -692,12 +709,12 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   const matTitan = matColor([1, 0.8, 0.15], [0.7, 0.45, 0]);
   const matExplo = matColor([1, 0.55, 0.1], [1, 0.4, 0]); matExplo.disableLighting = true;
 
-  const FLECHA = { largo: 1.2, vuelo: 4, clavada: 5, profundidad: 0.3, abanico: 5 };   // abanico: grados entre flechas
+  const FLECHA = { largo: 1.2, vuelo: 4, clavada: 5, profundidad: 0.3, abanico: 5 };
   const ARRIBA = V(0, 1, 0);
   const flechas = new Set();
   const impactos = [];
   const POT_ROMPE_TANQUE = 85;
-  let idBola = 0;
+  let idBola = 0, ultimoSonidoPared = 0;
 
   function mallaFlecha(potencia, titan) {
     const raiz = new BABYLON.TransformNode("flecha", scene);
@@ -746,8 +763,8 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     f.timer = setTimeout(() => quitarFlecha(f), FLECHA.clavada * 1000);
   }
 
-  // Explosión: golpea a todos los ragdolls dentro del radio (cuenta como un golpe fuerte)
   function explotar(punto, radio, clave) {
+    S.explosion();
     const bola = BABYLON.MeshBuilder.CreateSphere("explo", { diameter: 1, segments: 8 }, scene);
     bola.position.copyFrom(punto); bola.material = matExplo.clone("ex"); bola.isPickable = false;
     let t = 0;
@@ -772,11 +789,11 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   function golpear(c, cuerpo, vel, bolaId) {
     if (!c.vivo || c.intangible || c.bolasVistas.has("g" + bolaId)) return;
     c.bolasVistas.add("g" + bolaId);
-    if (c.T.jefe) {                                     // el jefe aguanta 5 golpes de lo que sea
+    if (c.T.jefe) {
       c.vidas--;
-      if (c.vidas > 0) { c.flash = 0.2; c.aturdido = 0.35; hudJefe(); return; }
+      if (c.vidas > 0) { c.flash = 0.2; c.aturdido = 0.35; hudJefe(); S.metal(); S.golpe(true); return; }
     } else if (c.vidas > 1 && vel.length() < POT_ROMPE_TANQUE) {
-      c.vidas--; c.flash = 0.18; c.aturdido = 0.5;
+      c.vidas--; c.flash = 0.18; c.aturdido = 0.5; S.metal();
       return;
     }
     derribar(c, cuerpo, vel, bolaId);
@@ -785,6 +802,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   function derribar(c, cuerpo, vel, bolaId) {
     c.vivo = false;
     c.timer = 2.5;
+    S.golpe(c.e > 1.2);
     c.partes.forEach(p => {
       p.agg.shape.filterMembershipMask = p.mascara;
       p.agg.body.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
@@ -797,10 +815,11 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     if (jugando) {
       aplastados++;
       puntos += c.T.puntos * PODERES.multPuntos();
-      PODERES.otorgar(c.tipo);                          // súper poder temporal según el tipo
+      if (PODERES.otorgar(c.tipo)) S.poder();
       if (c.T.jefe) {
         jefesMuertos++;
         const nv = PODERES.jefeDerrotado();
+        S.jefeMuerto();
         aviso("👑 <b>¡Jefe derrotado!</b> Flecha del Titán <b>Nv " + nv +
               "</b>: suelta con tensión máxima (100) para usarla", 5);
       }
@@ -830,7 +849,6 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     if (--e.cuadros <= 0) c.empuje = null;
   }
 
-  // Objetivo para la flecha teledirigida: ragdoll vivo más cercano por delante
   function objetivoGuia(pos, dir) {
     let mejor = null, dMin = 18;
     for (const c of corredores) {
@@ -904,11 +922,11 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     const origen = rayo.origin.add(dir.scale(1.5));
     const mod = PODERES.modDisparo(potencia >= POT_MAX);
     const n = mod.flechas;
-    for (let i = 0; i < n; i++) {                       // multiflecha: abanico horizontal
+    S.disparo(potencia, n);
+    for (let i = 0; i < n; i++) {
       const ang = (i - (n - 1) / 2) * FLECHA.abanico * GR;
       const q = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, ang);
-      const d = dir.applyRotationQuaternion(q);
-      lanzarFlecha(origen, d, potencia, mod);
+      lanzarFlecha(origen, dir.applyRotationQuaternion(q), potencia, mod);
     }
   }
 
@@ -919,13 +937,14 @@ window.addEventListener("error", e => msg("Error: " + e.message));
       if (f.clavada || !flechas.has(f)) continue;
       if (im.pared) {
         if (f.explosion) explotar(im.punto, f.explosion, "x" + f.id + "p");
+        else if (performance.now() - ultimoSonidoPared > 60) { S.pared(); ultimoSonidoPared = performance.now(); }
         clavar(f, im.punto, null);
         continue;
       }
       if (!corredores.includes(im.c) || im.c.intangible || im.c.bolasVistas.has("g" + f.id)) continue;
       golpear(im.c, im.cuerpo, im.vel, f.id);
       if (f.explosion) explotar(im.punto, f.explosion, "x" + f.id + "_" + aplastados);
-      if (f.perfora > 0 && f.agg) {                     // perforante: sigue de largo
+      if (f.perfora > 0 && f.agg) {
         f.perfora--;
         f.agg.body.setLinearVelocity(im.vel);
         continue;
@@ -961,7 +980,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     mira.style.left = (e.clientX - r.left) + "px";
     mira.style.top = (e.clientY - r.top) + "px";
   };
-  const cancelar = () => { cargando = false; dedo = null; mira.style.display = "none"; };
+  const cancelar = () => { cargando = false; dedo = null; mira.style.display = "none"; S.tensarFin(); };
 
   const setModoCamara = on => {
     modoCamara = on;
@@ -980,6 +999,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     if (modoCamara || !jugando || e.button !== 0 || cargando) return;
     cargando = true; tCarga = 0; dedo = e.pointerId;
     mostrarPotencia(POT_MIN);
+    S.tensarInicio();
     if (e.pointerType !== "mouse") { moverMira(e); mira.style.display = "block"; }
   });
   window.addEventListener("pointermove", e => { if (cargando && e.pointerId === dedo) moverMira(e); });
@@ -1000,6 +1020,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     if (!cargando) return;
     tCarga += Math.min(engine.getDeltaTime() / 1000, 0.05) * PODERES.factorCarga();
     mostrarPotencia(potenciaActual());
+    S.tensar(Math.min(1, tCarga / T_CARGA));
   });
 
   hud();

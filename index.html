@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#1d2430">
+<meta name="theme-color" content="#8cc8f5">
 <title>Resiste a los ragdolls</title>
 <style>
-  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #1d2430; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #8cc8f5; }
   #c { width: 100%; height: 100%; display: block; touch-action: none; outline: none;
        cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><circle cx='16' cy='16' r='11' fill='none' stroke='black' stroke-width='4' opacity='0.5'/><circle cx='16' cy='16' r='11' fill='none' stroke='white' stroke-width='2'/><circle cx='16' cy='16' r='2.5' fill='red' stroke='white' stroke-width='1'/></svg>") 16 16, crosshair; }
   .hud { position: absolute; color: #dfe6ee; font: 15px system-ui, sans-serif;
@@ -26,6 +26,15 @@
   #aviso { top: calc(60px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%);
            display: none; font-size: 17px; border: 2px solid #ffd166; max-width: 80vw; text-align: center; }
   #aviso b { color: #ffd166; }
+  #poderes { position: absolute; left: 12px; top: calc(56px + env(safe-area-inset-top, 0px));
+             display: none; flex-direction: column; gap: 4px; pointer-events: none; }
+  #poderes .chip { background: rgba(0,0,0,.55); color: #fff; font: 14px system-ui, sans-serif;
+                   padding: 4px 10px; border-radius: 14px; border: 1px solid #ffd166; }
+  #poderes .chip b { color: #ffd166; }
+  #poderes .chip small { margin-left: 6px; opacity: .75; }
+  #poderes .chip.titan { border-color: #ffcc22; box-shadow: 0 0 8px #ffcc22; }
+  #jefe { display: none; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+          font-size: 18px; border: 2px solid #c22; }
   #mira { position: absolute; display: none; pointer-events: none; width: 70px; height: 70px;
           border: 3px solid #aaa; border-radius: 50%; transform: translate(-50%, -50%);
           box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
@@ -45,6 +54,9 @@
     #viento { min-width: 60px; }
     #vFlecha { font-size: 26px; line-height: 30px; }
     #aviso { font-size: 13px; top: calc(48px + env(safe-area-inset-top, 0px)); }
+    #poderes { top: calc(46px + env(safe-area-inset-top, 0px)); }
+    #poderes .chip { font-size: 11px; padding: 3px 8px; }
+    #jefe { font-size: 14px; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
     #fin { font-size: 15px; padding: 16px 20px; }
     #fin h2 { font-size: 22px; }
   }
@@ -66,6 +78,8 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/babylonjs@7.54.3/babylon.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@babylonjs/havok@1.3.10/lib/umd/HavokPhysics_umd.js"></script>
+<script src="assets.js"></script>
+<script src="poderes.js"></script>
 </head>
 <body>
 <canvas id="c"></canvas>
@@ -74,8 +88,8 @@
 <div id="panel" class="hud">
   <label for="fuerza">Potencia: <b id="fv">10</b></label>
   <input id="fuerza" type="range" min="10" max="100" step="1" value="10" disabled>
-  <small class="pc">¡No los dejes cruzar la línea roja! · Mantén clic izquierdo para tensar, suelta para disparar · Clic derecho y arrastrar: cámara</small>
-  <small class="tactil">¡Que no crucen la línea roja! · Mantén el dedo para tensar, arrastra para apuntar, suelta para disparar</small>
+  <small class="pc">¡No los dejes cruzar la meta! · Mantén clic izquierdo para tensar, suelta para disparar · Clic derecho y arrastrar: cámara</small>
+  <small class="tactil">¡Que no crucen la meta! · Mantén el dedo para tensar, arrastra para apuntar, suelta para disparar</small>
 </div>
 <div id="viento" class="hud">
   <div>Viento</div>
@@ -84,6 +98,8 @@
   <div id="vFuerza">Calma</div>
 </div>
 <div id="aviso" class="hud"></div>
+<div id="poderes"></div>
+<div id="jefe" class="hud"></div>
 <div id="mira"></div>
 <button id="modo" class="hud">🎥 Cámara</button>
 <div id="fin" class="hud">
@@ -101,7 +117,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
 
   const canvas = document.getElementById("c");
   const engine = new BABYLON.Engine(canvas, true);
-  engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, 1.5));   // nítido sin matar la GPU del celular
+  engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, 1.5));
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color4(0.11, 0.14, 0.19, 1);
 
@@ -157,47 +173,81 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   const fv = document.getElementById("fv");
   slider.addEventListener("input", () => { fv.textContent = slider.value; });
 
+  // ---------- Semilla: aleatorio pero igual para todos ----------
+  const SEED = (Number(new URLSearchParams(location.search).get("seed")) || 20261126) >>> 0;
+  function crearRng(seed) {   // mulberry32
+    return () => {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  let rngSpawn, rngViento, rngJefe;
+  const reiniciarRng = () => {
+    rngSpawn = crearRng(SEED); rngViento = crearRng(SEED ^ 0x9E3779B9); rngJefe = crearRng(SEED ^ 0x51ED270B);
+  };
+  reiniciarRng();
+
+  // ---------- Dificultad: depende del TIEMPO (igual para todos) ----------
+  const DIF = {
+    velIni: 1.8, velPorSeg: 0.012, velMax: 6.5,
+    spawnIni: 3.0, spawnMin: 0.7, spawnPorSeg: 0.011,
+    caosDesde: 40, caosHasta: 220,
+    jefePrimero: 90, jefeCada: 120                       // segundos
+  };
+  const velocidadEn = t => Math.min(DIF.velMax, DIF.velIni + DIF.velPorSeg * t);
+  const intervaloEn = t => Math.max(DIF.spawnMin, DIF.spawnIni - DIF.spawnPorSeg * t);
+
   // ---------- Móvil ----------
   const esMovil = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
-  // Encuadre: en vertical la arena no cabe, alejamos la cámara
   const encuadrar = () => {
     const asp = engine.getRenderWidth() / engine.getRenderHeight();
-    camera.radius = asp < 1 ? Math.min(60, 30 / asp * 0.9) : 30;
+    camera.radius = asp < 1 ? Math.min(60, 30 / asp * 0.9) : 32;
     camera.upperRadiusLimit = Math.max(60, camera.radius);
   };
   window.addEventListener("resize", encuadrar);
   window.addEventListener("orientationchange", () => setTimeout(() => { engine.resize(); encuadrar(); }, 200));
 
-  // ---------- Tipos de ragdoll ----------
+  // ---------- Mapa (assets.js) y poderes (poderes.js) ----------
+  if (!window.MAPA) { msg("Falta assets.js junto a index.html"); return; }
+  if (!window.PODERES) { msg("Falta poderes.js junto a index.html"); return; }
+  const mapa = MAPA.crear(scene, BABYLON);
+  const metaMat = mapa.metaMat;
+
+  // ---------- Tipos de ragdoll (desde = segundos de partida) ----------
   const TIPOS = {
-    normal:   { nombre: "Normal",   esc: 1.0,  vel: 1.0, vidas: 1, puntos: 1,  desde: 0,  peso: 10 },
-    veloz:    { nombre: "Veloz",    esc: 0.8,  vel: 1.6, vidas: 1, puntos: 2,  desde: 3,  peso: 4,
+    normal:   { nombre: "Normal",   esc: 1.0,  vel: 1.0, vidas: 1, puntos: 1,  desde: 0,   peso: 10 },
+    veloz:    { nombre: "Veloz",    esc: 0.8,  vel: 1.6, vidas: 1, puntos: 2,  desde: 25,  peso: 4,
                 color: [1, 0.85, 0.1], desc: "corre 60% más rápido" },
-    dorado:   { nombre: "Dorado",   esc: 0.7,  vel: 1.9, vidas: 1, puntos: 10, desde: 5,  peso: 0.6,
+    dorado:   { nombre: "Dorado",   esc: 0.7,  vel: 1.9, vidas: 1, puntos: 10, desde: 45,  peso: 0.6,
                 color: [1, 0.75, 0.1], brillo: [0.5, 0.35, 0], caos: 1, desc: "raro, rapidísimo y errático: vale 10" },
-    tanque:   { nombre: "Tanque",   esc: 1.35, vel: 0.65, vidas: 3, puntos: 3, desde: 6,  peso: 3,
+    tanque:   { nombre: "Tanque",   esc: 1.35, vel: 0.65, vidas: 3, puntos: 3, desde: 60,  peso: 3,
                 color: [0.4, 0.4, 0.45], desc: "aguanta 3 flechazos (o 1 con potencia ≥ 85)" },
-    mitosis:  { nombre: "Mitosis",  esc: 1.1,  vel: 0.9, vidas: 1, puntos: 1,  desde: 8,  peso: 3,
+    mitosis:  { nombre: "Mitosis",  esc: 1.1,  vel: 0.9, vidas: 1, puntos: 1,  desde: 80,  peso: 3,
                 color: [0.3, 0.9, 0.4], divide: true, desc: "al caer se divide en 2 minis" },
-    ninja:    { nombre: "Ninja",    esc: 0.95, vel: 1.1, vidas: 1, puntos: 3,  desde: 10, peso: 3,
+    ninja:    { nombre: "Ninja",    esc: 0.95, vel: 1.1, vidas: 1, puntos: 3,  desde: 100, peso: 3,
                 color: [0.12, 0.12, 0.18], esquiva: true, desc: "esquiva las flechas que ve venir" },
-    fantasma: { nombre: "Fantasma", esc: 1.0,  vel: 0.9, vidas: 1, puntos: 3,  desde: 14, peso: 3,
+    fantasma: { nombre: "Fantasma", esc: 1.0,  vel: 0.9, vidas: 1, puntos: 3,  desde: 130, peso: 3,
                 color: [0.85, 0.9, 1], fantasma: true, desc: "se vuelve intangible a ratos" },
     mini:     { nombre: "Mini",     esc: 0.6,  vel: 1.5, vidas: 1, puntos: 1,  desde: Infinity, peso: 0,
-                color: [0.3, 0.9, 0.4] }
+                color: [0.3, 0.9, 0.4] },
+    jefe:     { nombre: "JEFE",     esc: 2.1,  vel: 0.45, vidas: 5, puntos: 25, desde: Infinity, peso: 0,
+                color: [0.55, 0.05, 0.12], brillo: [0.15, 0, 0.03], jefe: true, cuentaPasar: 5,
+                desc: "5 flechazos para derribarlo. Si cruza, cuenta como 5" }
   };
-  const vistos = new Set(["normal", "mini"]);
+  let vistos = new Set(["normal", "mini"]);
 
   function elegirTipo() {
-    const disp = Object.entries(TIPOS).filter(([, t]) => aplastados >= t.desde && t.peso > 0);
-    let r = Math.random() * disp.reduce((s, [, t]) => s + t.peso, 0);
+    const disp = Object.entries(TIPOS).filter(([, t]) => tiempo >= t.desde && t.peso > 0);
+    let r = rngSpawn() * disp.reduce((s, [, t]) => s + t.peso, 0);
     for (const [id, t] of disp) { r -= t.peso; if (r <= 0) return id; }
     return "normal";
   }
 
   const avisoEl = document.getElementById("aviso");
   let avisoT = 0;
-  function aviso(html) { avisoEl.innerHTML = html; avisoEl.style.display = "block"; avisoT = 3.5; }
+  function aviso(html, seg = 3.5) { avisoEl.innerHTML = html; avisoEl.style.display = "block"; avisoT = seg; }
 
   const matColor = (rgb, brillo) => {
     const m = new BABYLON.StandardMaterial("m", scene);
@@ -207,37 +257,45 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   };
 
   // ---------- Modo resistir ----------
-  const DIR = 1;
-  const X_SALIDA = -13.5, X_META = 13.5;
+  const X_SALIDA = -14.5, X_META = MAPA.CFG.xMeta;
   const MAX_PASAN = 30;
-
-  const meta = BABYLON.MeshBuilder.CreateGround("meta", { width: 0.4, height: 30 }, scene);
-  meta.position.set(X_META, 0.02, 0);
-  const metaMat = new BABYLON.StandardMaterial("metaMat", scene);
-  metaMat.diffuseColor = new BABYLON.Color3(0.9, 0.1, 0.1);
-  metaMat.emissiveColor = new BABYLON.Color3(0.5, 0, 0);
-  meta.material = metaMat; meta.isPickable = false;
-  camera.alpha = -Math.PI / 2;   // vista lateral: salen por la izquierda, la meta queda a la derecha
+  camera.alpha = -Math.PI / 2;
   encuadrar();
 
   // ---------- Corredores ----------
   let corredores = [];
   const duenio = new Map();
-  let aplastados = 0, puntos = 0, pasaron = 0, velocidad = 3, jugando = true, proximo = 0.5;
-  let tiempo = 0, ultimoSeg = -1;
+  let aplastados = 0, puntos = 0, pasaron = 0, velocidad = DIF.velIni, jugando = true, proximo = 2;
+  let tiempo = 0, ultimoSeg = -1, proximoJefe = DIF.jefePrimero, jefesMuertos = 0;
   const reloj = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
 
-  function crearCorredor(tipoId = elegirTipo(), op = {}) {
-    const T = TIPOS[tipoId], e = T.esc;
+  function spawnProgramado() {
+    const tipo = elegirTipo();
+    const ip = Math.floor(rngSpawn() * mapa.puertas.length);
+    const dz = (rngSpawn() - 0.5) * 1.4;
+    const semilla = Math.floor(rngSpawn() * 4294967296);
+    const p = mapa.puertas[ip];
+    mapa.brillarPuerta(ip);
+    crearCorredor(tipo, { x: p.x, z: p.z + dz, rng: crearRng(semilla) });
+  }
+
+  function spawnJefe() {
+    const ip = Math.floor(rngJefe() * mapa.puertas.length);
+    const p = mapa.puertas[ip];
+    mapa.brillarPuerta(ip);
+    crearCorredor("jefe", { x: p.x + 0.6, z: p.z, rng: crearRng(Math.floor(rngJefe() * 4294967296)) });
+    aviso("⚠️ <b>¡Llega un JEFE!</b> 5 flechazos para derribarlo · si cruza cuenta como 5", 4);
+  }
+
+  function crearCorredor(tipoId, op) {
+    const T = TIPOS[tipoId], e = T.esc, rnd = op.rng;
     if (!vistos.has(tipoId)) {
       vistos.add(tipoId);
-      aviso("¡Nuevo! <b>" + T.nombre + "</b>: " + T.desc + " · vale " + T.puntos);
+      if (!T.jefe) aviso("¡Nuevo! <b>" + T.nombre + "</b>: " + T.desc + " · vale " + T.puntos);
     }
-    const dir = DIR;
-    const x0 = op.x ?? X_SALIDA + 0.5;
-    const z = op.z ?? (Math.random() * 2 - 1) * 11;
+    const x0 = op.x, z = op.z;
     const mats = [];
-    let ropa = ropas[Math.floor(Math.random() * ropas.length)], pielM = piel;
+    let ropa = ropas[Math.floor(rnd() * ropas.length)], pielM = piel;
     if (T.color) { ropa = matColor(T.color, T.brillo); mats.push(ropa); }
     if (T.fantasma) { pielM = piel.clone("pf"); mats.push(pielM); }
     const partes = [];
@@ -292,18 +350,24 @@ window.addEventListener("error", e => msg("Error: " + e.message));
       banda.material = matColor([0.9, 0.1, 0.1]); mats.push(banda.material);
       banda.parent = cabeza.transformNode; banda.position.y = 0.06 * e; banda.isPickable = false;
     }
+    if (T.jefe) {   // corona dorada
+      const corona = BABYLON.MeshBuilder.CreateCylinder("corona",
+        { height: 0.18 * e, diameterTop: 0.42 * e, diameterBottom: 0.34 * e, tessellation: 8 }, scene);
+      corona.material = matColor([1, 0.8, 0.1], [0.4, 0.3, 0]); mats.push(corona.material);
+      corona.parent = cabeza.transformNode; corona.position.y = 0.2 * e; corona.isPickable = false;
+    }
 
     partes.forEach(p => {
       p.agg.body.setMotionType(BABYLON.PhysicsMotionType.ANIMATED);
       p.mascara = p.agg.shape.filterMembershipMask;
     });
     const huesos = { torso, cabeza, bSI, bII, bSD, bID, mI, pI, mD, pD };
-    const c = { tipo: tipoId, T, e, partes, torso, huesos, mats, ropa, dir, x: x0, z,
-                t: Math.random() * 3, fase: Math.random(), vivo: true, timer: 0, empuje: null,
-                rumbo: 0, desvio: 0, desvioObj: 0, tCambio: Math.random() * 1.5,
+    const c = { tipo: tipoId, T, e, rng: rnd, partes, torso, huesos, mats, ropa, x: x0, z,
+                t: 0, fase: rnd(), vivo: true, timer: 0, empuje: null,
+                rumbo: 0, desvio: 0, desvioObj: 0, tCambio: rnd() * 1.5,
                 velMult: 1, vidas: T.vidas, bolasVistas: new Set(op.bolasVistas || []),
                 aturdido: 0, flash: 0, dash: null, cdEsquive: 0,
-                tFant: 1 + Math.random() * 2, intangible: false };
+                tFant: 1 + rnd() * 2, intangible: false };
     corredores.push(c);
     partes.forEach(p => duenio.set(p.agg.body, c));
     return c;
@@ -315,6 +379,14 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     corredores = corredores.filter(o => o !== c);
   }
 
+  const jefeEl = document.getElementById("jefe");
+  function hudJefe() {
+    const j = corredores.find(c => c.vivo && c.T.jefe);
+    if (!j) { jefeEl.style.display = "none"; return; }
+    jefeEl.style.display = "block";
+    jefeEl.innerHTML = "👑 JEFE " + "❤️".repeat(j.vidas) + "🖤".repeat(TIPOS.jefe.vidas - j.vidas);
+  }
+
   function hud() {
     const peligro = pasaron >= MAX_PASAN * 0.8 ? " style='color:#ff5555'" : "";
     info.innerHTML = "Eliminados: <b>" + aplastados + "</b> · Puntos: <b>" + puntos +
@@ -322,21 +394,25 @@ window.addEventListener("error", e => msg("Error: " + e.message));
       "</b> · Tiempo: <b>" + reloj(tiempo) + "</b>" +
       "<span class='extra'> · Velocidad: <b>" + velocidad.toFixed(1) +
       "</b> · Caos: <b>" + Math.round(nivelCaos() * 100) + "%</b></span>";
+    hudJefe();
   }
 
   function finJuego() {
     jugando = false;
     document.getElementById("finTxt").innerHTML =
       "Pasaron " + MAX_PASAN + " ragdolls la meta.<br>Eliminaste <b>" + aplastados + "</b> · " +
-      puntos + " puntos · resististe " + reloj(tiempo) + ".";
+      puntos + " puntos · " + jefesMuertos + " jefe" + (jefesMuertos === 1 ? "" : "s") +
+      " · resististe " + reloj(tiempo) + ".<br><small>Semilla: " + SEED + "</small>";
     document.getElementById("fin").style.display = "block";
   }
 
   document.getElementById("otra").addEventListener("click", () => {
     [...corredores].forEach(borrar);
     [...flechas].forEach(quitarFlecha);
-    aplastados = 0; puntos = 0; pasaron = 0; velocidad = 3; proximo = 0.5; jugando = true;
-    tiempo = 0; ultimoSeg = -1;
+    aplastados = 0; puntos = 0; pasaron = 0; velocidad = DIF.velIni; proximo = 2; jugando = true;
+    tiempo = 0; ultimoSeg = -1; vistos = new Set(["normal", "mini"]);
+    proximoJefe = DIF.jefePrimero; jefesMuertos = 0;
+    reiniciarRng(); reiniciarViento(); PODERES.reset();
     document.getElementById("fin").style.display = "none";
     hud();
   });
@@ -405,8 +481,8 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   }
 
   // ---------- Trayectoria + habilidades ----------
-  const CAOS = { aplastadosMax: 25, anguloMax: 70, cambioMin: 0.6, cambioMax: 2.5, giro: 2.5 };
-  const nivelCaos = () => Math.min(1, aplastados / CAOS.aplastadosMax);
+  const CAOS = { anguloMax: 70, cambioMin: 0.6, cambioMax: 2.5, giro: 2.5 };
+  const nivelCaos = () => Math.min(1, Math.max(0, (tiempo - DIF.caosDesde) / (DIF.caosHasta - DIF.caosDesde)));
   const bolasVivas = new Set();
 
   function intentarEsquivar(c) {
@@ -421,7 +497,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
       const dx = rx - v.x * tMin, dz = rz - v.z * tMin;
       if (dx * dx + dz * dz > 1.5 * 1.5) continue;
       c.bolasVistas.add(b.id);
-      if (Math.random() > 0.75) continue;
+      if (c.rng() > 0.75) continue;
       const l = Math.sqrt(vv), lado = (dx * -v.z + dz * v.x) >= 0 ? 1 : -1;
       c.dash = { vx: -v.z / l * lado * 14, vz: v.x / l * lado * 14, t: 0.22 };
       c.cdEsquive = 2.2;
@@ -433,7 +509,7 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     c.tFant -= dt;
     if (c.tFant <= 0) {
       c.intangible = !c.intangible;
-      c.tFant = c.intangible ? 1.2 : 1.5 + Math.random() * 1.5;
+      c.tFant = c.intangible ? 1.2 : 1.5 + c.rng() * 1.5;
       c.partes.forEach(p => { p.agg.shape.filterMembershipMask = c.intangible ? 0 : p.mascara; });
     }
     const a = c.intangible ? 0.15 : (c.tFant < 0.4 ? 0.5 + 0.4 * Math.sin(tiempo * 40) : 0.9);
@@ -441,12 +517,12 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   }
 
   function mover(c, dt) {
-    const caos = Math.max(nivelCaos(), c.T.caos || 0);
+    const caos = c.T.jefe ? 0.3 : Math.max(nivelCaos(), c.T.caos || 0);
     c.tCambio -= dt;
     if (c.tCambio <= 0) {
-      c.desvioObj = (Math.random() * 2 - 1) * CAOS.anguloMax * GR * caos;
-      c.tCambio = lerp(CAOS.cambioMax, CAOS.cambioMin, caos) * (0.5 + Math.random());
-      if (caos > 0.5 && Math.random() < 0.15 * caos) c.velMult = 1.6;
+      c.desvioObj = (c.rng() * 2 - 1) * CAOS.anguloMax * GR * caos;
+      c.tCambio = lerp(CAOS.cambioMax, CAOS.cambioMin, caos) * (0.5 + c.rng());
+      if (caos > 0.5 && c.rng() < 0.15 * caos) c.velMult = 1.6;
     }
     if (c.z > 11 && c.desvioObj > 0) c.desvioObj = -Math.abs(c.desvioObj);
     if (c.z < -11 && c.desvioObj < 0) c.desvioObj = Math.abs(c.desvioObj);
@@ -472,7 +548,8 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     if (c.T.fantasma) actualizarFantasma(c, dt);
     if (c.flash > 0) {
       c.flash -= dt;
-      c.ropa.emissiveColor = c.flash > 0 ? new BABYLON.Color3(0.9, 0.1, 0.1) : new BABYLON.Color3(0, 0, 0);
+      c.ropa.emissiveColor = c.flash > 0 ? new BABYLON.Color3(0.9, 0.1, 0.1)
+                           : (c.T.brillo ? new BABYLON.Color3(...c.T.brillo) : new BABYLON.Color3(0, 0, 0));
     }
     return v;
   }
@@ -480,31 +557,38 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   let flashMeta = 0;
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
+    const dtR = dt * PODERES.factorRagdolls();          // cámara lenta solo para los ragdolls
+    mapa.actualizar(dt);
+    PODERES.actualizar(dt);
     if (avisoT > 0 && (avisoT -= dt) <= 0) avisoEl.style.display = "none";
     if (flashMeta > 0) {
       flashMeta -= dt;
-      metaMat.emissiveColor = new BABYLON.Color3(flashMeta > 0 ? 1 : 0.5, flashMeta > 0 ? 0.4 : 0, 0);
+      metaMat.emissiveColor = new BABYLON.Color3(flashMeta > 0 ? 1 : 0.25, flashMeta > 0 ? 0.4 : 0, 0);
     }
 
     if (jugando) {
       tiempo += dt;
+      velocidad = velocidadEn(tiempo);
       if (Math.floor(tiempo) !== ultimoSeg) { ultimoSeg = Math.floor(tiempo); hud(); }
       proximo -= dt;
-      const vivos = corredores.filter(c => c.vivo).length;
-      if (proximo <= 0 && vivos < 8) {
-        crearCorredor();
-        proximo = Math.max(0.4, 1.8 - aplastados * 0.04) * (0.6 + Math.random() * 0.8);
+      if (proximo <= 0) {
+        spawnProgramado();
+        proximo += intervaloEn(tiempo) * (0.6 + rngSpawn() * 0.8);
       }
+      if (tiempo >= proximoJefe) { spawnJefe(); proximoJefe += DIF.jefeCada; }
     }
 
     for (const c of [...corredores]) {
       if (c.vivo) {
-        c.t += dt;
-        const v = mover(c, dt);
-        animar(c, dt, Math.max(v, 1));
+        c.t += dtR;
+        const v = mover(c, dtR);
+        animar(c, dtR, Math.max(v, 1));
         if (c.x > X_META) {
           borrar(c);
-          if (jugando) { pasaron++; flashMeta = 0.25; hud(); if (pasaron >= MAX_PASAN) finJuego(); }
+          if (jugando) {
+            pasaron += c.T.cuentaPasar || 1; flashMeta = 0.25; hud();
+            if (pasaron >= MAX_PASAN) finJuego();
+          }
         }
       } else {
         if (c.empuje) aplicarEmpuje(c);
@@ -514,22 +598,34 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     }
   });
 
-  // ---------- Viento ----------
-  const VIENTO = { intervalo: 10, max: 18, transicion: 1.5, nStreaks: esMovil ? 35 : 70 };
-  const viento = { actual: V(0, 0, 0), desde: V(0, 0, 0), hacia: V(0, 0, 0), t: 0, tTrans: 0 };
+  // ---------- Viento: ráfagas de 10 s separadas por periodos de calma ----------
+  const VIENTO = { duracion: 10, calmaMin: 5, calmaMax: 9, calmaInicial: 12,
+                   max: 18, transicion: 1.5, nStreaks: esMovil ? 35 : 70 };
+  const viento = { actual: V(0, 0, 0), desde: V(0, 0, 0), hacia: V(0, 0, 0), t: 0, tTrans: 1, soplando: false };
   const uiViento = document.getElementById("viento");
   const uiFlecha = document.getElementById("vFlecha");
   const uiFuerza = document.getElementById("vFuerza");
   const uiBarras = document.getElementById("vBarras");
 
-  function nuevoViento() {
-    const ang = Math.random() * Math.PI * 2;
-    const fuerza = Math.random() < 0.15 ? 0 : (0.25 + 0.75 * Math.random()) * VIENTO.max;
-    viento.desde = viento.actual.clone();
-    viento.hacia = V(Math.cos(ang) * fuerza, 0, Math.sin(ang) * fuerza);
-    viento.t = VIENTO.intervalo; viento.tTrans = 0;
+  function siguienteFaseViento() {
+    viento.desde = viento.actual.clone(); viento.tTrans = 0;
+    if (viento.soplando) {
+      viento.soplando = false;
+      viento.hacia = V(0, 0, 0);
+      viento.t = VIENTO.calmaMin + rngViento() * (VIENTO.calmaMax - VIENTO.calmaMin);
+    } else {
+      viento.soplando = true;
+      const ang = rngViento() * Math.PI * 2;
+      const fuerza = (0.25 + 0.75 * rngViento()) * VIENTO.max;
+      viento.hacia = V(Math.cos(ang) * fuerza, 0, Math.sin(ang) * fuerza);
+      viento.t = VIENTO.duracion;
+    }
   }
-  nuevoViento();
+  function reiniciarViento() {
+    viento.actual = V(0, 0, 0); viento.desde = V(0, 0, 0); viento.hacia = V(0, 0, 0);
+    viento.soplando = false; viento.t = VIENTO.calmaInicial; viento.tTrans = 1;
+  }
+  reiniciarViento();
 
   const streakMat = new BABYLON.StandardMaterial("aire", scene);
   streakMat.emissiveColor = new BABYLON.Color3(1, 1, 1);
@@ -549,8 +645,10 @@ window.addEventListener("error", e => msg("Error: " + e.message));
 
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
-    viento.t -= dt;
-    if (viento.t <= 0) nuevoViento();
+    if (jugando) {
+      viento.t -= dt;
+      if (viento.t <= 0) siguienteFaseViento();
+    }
     viento.tTrans = Math.min(1, viento.tTrans + dt / VIENTO.transicion);
     const s = viento.tTrans * viento.tTrans * (3 - 2 * viento.tTrans);
     viento.actual = BABYLON.Vector3.Lerp(viento.desde, viento.hacia, s);
@@ -570,9 +668,10 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     uiFlecha.style.opacity = f < 0.3 ? 0.25 : 1;
     const nivel = Math.round(k * 5);
     uiBarras.textContent = "▮".repeat(nivel) + "▯".repeat(5 - nivel);
-    uiFuerza.textContent = f < 0.3 ? "Calma" : (f * 2.5).toFixed(0) + " km/h";
+    uiFuerza.innerHTML = f < 0.3
+      ? "Calma<br><small>viento en " + Math.ceil(viento.t) + " s</small>"
+      : (f * 2.5).toFixed(0) + " km/h";
     uiViento.style.borderColor = `hsl(${200 - 200 * k}, 80%, 60%)`;
-    uiViento.title = "Cambia en " + Math.ceil(viento.t) + " s";
   });
 
   // ---------- Flechas ----------
@@ -590,22 +689,24 @@ window.addEventListener("error", e => msg("Error: " + e.message));
   const materialAstil = p => matsAstil[Math.round(Math.min(1, Math.max(0, (p - 10) / 90)) * 9)];
   const matPunta = matColor([0.75, 0.75, 0.8]); matPunta.specularColor = new BABYLON.Color3(1, 1, 1);
   const matPlumas = matColor([0.95, 0.95, 0.95]);
+  const matTitan = matColor([1, 0.8, 0.15], [0.7, 0.45, 0]);
+  const matExplo = matColor([1, 0.55, 0.1], [1, 0.4, 0]); matExplo.disableLighting = true;
 
-  const FLECHA = { largo: 1.2, vuelo: 4, clavada: 5, profundidad: 0.3 };
+  const FLECHA = { largo: 1.2, vuelo: 4, clavada: 5, profundidad: 0.3, abanico: 5 };   // abanico: grados entre flechas
   const ARRIBA = V(0, 1, 0);
   const flechas = new Set();
   const impactos = [];
   const POT_ROMPE_TANQUE = 85;
   let idBola = 0;
 
-  function mallaFlecha(potencia) {
+  function mallaFlecha(potencia, titan) {
     const raiz = new BABYLON.TransformNode("flecha", scene);
     const L = FLECHA.largo;
-    const astil = BABYLON.MeshBuilder.CreateCylinder("astil", { height: L, diameter: 0.05, tessellation: 6 }, scene);
-    astil.material = materialAstil(potencia);
+    const astil = BABYLON.MeshBuilder.CreateCylinder("astil", { height: L, diameter: titan ? 0.08 : 0.05, tessellation: 6 }, scene);
+    astil.material = titan ? matTitan : materialAstil(potencia);
     const punta = BABYLON.MeshBuilder.CreateCylinder("punta",
-      { height: 0.2, diameterTop: 0, diameterBottom: 0.13, tessellation: 6 }, scene);
-    punta.position.y = L / 2 + 0.1; punta.material = matPunta;
+      { height: 0.2, diameterTop: 0, diameterBottom: titan ? 0.2 : 0.13, tessellation: 6 }, scene);
+    punta.position.y = L / 2 + 0.1; punta.material = titan ? matTitan : matPunta;
     const pl1 = BABYLON.MeshBuilder.CreateBox("pluma", { width: 0.2, height: 0.22, depth: 0.01 }, scene);
     pl1.position.y = -L / 2 + 0.12; pl1.material = matPlumas;
     const pl2 = pl1.clone("pluma2"); pl2.rotation.y = Math.PI / 2;
@@ -645,10 +746,36 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     f.timer = setTimeout(() => quitarFlecha(f), FLECHA.clavada * 1000);
   }
 
+  // Explosión: golpea a todos los ragdolls dentro del radio (cuenta como un golpe fuerte)
+  function explotar(punto, radio, clave) {
+    const bola = BABYLON.MeshBuilder.CreateSphere("explo", { diameter: 1, segments: 8 }, scene);
+    bola.position.copyFrom(punto); bola.material = matExplo.clone("ex"); bola.isPickable = false;
+    let t = 0;
+    const obs = scene.onBeforeRenderObservable.add(() => {
+      t += engine.getDeltaTime() / 1000;
+      const k = Math.min(1, t / 0.35);
+      bola.scaling.setAll(radio * 2 * (0.3 + 0.7 * k));
+      bola.material.alpha = 0.7 * (1 - k);
+      if (k >= 1) { scene.onBeforeRenderObservable.remove(obs); bola.material.dispose(); bola.dispose(); }
+    });
+    for (const c of [...corredores]) {
+      if (!c.vivo || c.intangible) continue;
+      const p = c.huesos.torso.transformNode.getAbsolutePosition();
+      const d = p.subtract(punto);
+      if (d.length() > radio + 0.5 * c.e) continue;
+      d.y = 0;
+      const dir = d.lengthSquared() > 1e-4 ? d.normalize() : V(1, 0, 0);
+      golpear(c, c.huesos.torso.body, dir.scale(90).add(V(0, 20, 0)), clave);
+    }
+  }
+
   function golpear(c, cuerpo, vel, bolaId) {
     if (!c.vivo || c.intangible || c.bolasVistas.has("g" + bolaId)) return;
     c.bolasVistas.add("g" + bolaId);
-    if (c.vidas > 1 && vel.length() < POT_ROMPE_TANQUE) {
+    if (c.T.jefe) {                                     // el jefe aguanta 5 golpes de lo que sea
+      c.vidas--;
+      if (c.vidas > 0) { c.flash = 0.2; c.aturdido = 0.35; hudJefe(); return; }
+    } else if (c.vidas > 1 && vel.length() < POT_ROMPE_TANQUE) {
       c.vidas--; c.flash = 0.18; c.aturdido = 0.5;
       return;
     }
@@ -667,10 +794,22 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     if (dirH.lengthSquared() < 1e-4) dirH.set(Math.cos(c.rumbo), 0, Math.sin(c.rumbo));
     dirH.normalize();
     c.empuje = { dir: dirH, rapidez: Math.max(8, vel.length()), golpeado: cuerpo, cuadros: 2 };
-    if (jugando) { aplastados++; puntos += c.T.puntos; velocidad += 0.25; hud(); }
+    if (jugando) {
+      aplastados++;
+      puntos += c.T.puntos * PODERES.multPuntos();
+      PODERES.otorgar(c.tipo);                          // súper poder temporal según el tipo
+      if (c.T.jefe) {
+        jefesMuertos++;
+        const nv = PODERES.jefeDerrotado();
+        aviso("👑 <b>¡Jefe derrotado!</b> Flecha del Titán <b>Nv " + nv +
+              "</b>: suelta con tensión máxima (100) para usarla", 5);
+      }
+      hud();
+    }
     if (c.T.divide && jugando) {
       for (const lado of [-1, 1]) {
         const m = crearCorredor("mini", { x: c.x, z: Math.max(-12, Math.min(12, c.z + lado * 1.2)),
+                                          rng: crearRng(Math.floor(c.rng() * 4294967296)),
                                           bolasVistas: ["g" + bolaId] });
         m.desvio = m.desvioObj = lado * 45 * GR; m.tCambio = 0.8;
       }
@@ -691,21 +830,32 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     if (--e.cuadros <= 0) c.empuje = null;
   }
 
-  function disparar(potencia, px, py) {
-    const rayo = scene.createPickingRay(px, py, BABYLON.Matrix.Identity(), camera);
-    const dir = rayo.direction.normalize();
+  // Objetivo para la flecha teledirigida: ragdoll vivo más cercano por delante
+  function objetivoGuia(pos, dir) {
+    let mejor = null, dMin = 18;
+    for (const c of corredores) {
+      if (!c.vivo || c.intangible) continue;
+      const p = c.huesos.torso.transformNode.getAbsolutePosition();
+      const d = p.subtract(pos), l = d.length();
+      if (l < dMin && BABYLON.Vector3.Dot(d, dir) / l > 0.3) { dMin = l; mejor = p; }
+    }
+    return mejor;
+  }
+
+  function lanzarFlecha(origen, dir, potencia, mod) {
     const esfera = BABYLON.MeshBuilder.CreateSphere("fis", { diameter: 0.18, segments: 4 }, scene);
     esfera.isVisible = false; esfera.isPickable = false;
-    esfera.position.copyFrom(rayo.origin.add(dir.scale(1.5)));
+    esfera.position.copyFrom(origen);
     const agg = new BABYLON.PhysicsAggregate(esfera, BABYLON.PhysicsShapeType.SPHERE,
       { mass: 3, restitution: 0, friction: 1 }, scene);
     const vel = dir.scale(potencia);
     agg.body.setLinearVelocity(vel);
-    try { agg.body.setGravityFactor(0.35); } catch (e) {}
+    try { agg.body.setGravityFactor(mod.recta ? 0 : 0.35); } catch (e) {}
 
     const id = ++idBola;
-    const f = { id, agg, esfera, raiz: mallaFlecha(potencia), dir: dir.clone(), velPrevia: vel.clone(),
-                clavada: false, registro: { id, agg } };
+    const f = { id, agg, esfera, raiz: mallaFlecha(potencia, mod.titan), dir: dir.clone(), velPrevia: vel.clone(),
+                clavada: false, registro: { id, agg },
+                perfora: mod.perfora, explosion: mod.explosion, guia: mod.guia, recta: mod.recta };
     const ponerMalla = () => {
       orientar(f.raiz, f.dir);
       f.raiz.position.copyFrom(esfera.position.subtract(f.dir.scale(FLECHA.largo / 2)));
@@ -723,7 +873,15 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     f.vientoObs = scene.onBeforePhysicsObservable.add(() => {
       const dtF = Math.min(engine.getDeltaTime() / 1000, 0.05);
       const v = agg.body.getLinearVelocity();
-      agg.body.setLinearVelocity(v.addInPlace(viento.actual.scale(dtF)));
+      if (!f.recta) v.addInPlace(viento.actual.scale(dtF));
+      if (f.guia > 0) {
+        const obj = objetivoGuia(esfera.position, f.dir);
+        if (obj) {
+          const deseada = obj.subtract(esfera.position).normalize().scale(v.length());
+          v.copyFrom(BABYLON.Vector3.Lerp(v, deseada, Math.min(1, f.guia * dtF)));
+        }
+      }
+      agg.body.setLinearVelocity(v);
     });
 
     agg.body.setCollisionCallbackEnabled(true);
@@ -740,21 +898,43 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     f.timer = setTimeout(() => { if (!f.clavada) quitarFlecha(f); }, FLECHA.vuelo * 1000);
   }
 
+  function disparar(potencia, px, py) {
+    const rayo = scene.createPickingRay(px, py, BABYLON.Matrix.Identity(), camera);
+    const dir = rayo.direction.normalize();
+    const origen = rayo.origin.add(dir.scale(1.5));
+    const mod = PODERES.modDisparo(potencia >= POT_MAX);
+    const n = mod.flechas;
+    for (let i = 0; i < n; i++) {                       // multiflecha: abanico horizontal
+      const ang = (i - (n - 1) / 2) * FLECHA.abanico * GR;
+      const q = BABYLON.Quaternion.RotationAxis(BABYLON.Axis.Y, ang);
+      const d = dir.applyRotationQuaternion(q);
+      lanzarFlecha(origen, d, potencia, mod);
+    }
+  }
+
   scene.onBeforeRenderObservable.add(() => {
     while (impactos.length) {
       const im = impactos.shift();
-      if (im.f.clavada || !flechas.has(im.f)) continue;
-      if (im.pared) { clavar(im.f, im.punto, null); continue; }
-      if (!corredores.includes(im.c) || im.c.intangible) continue;
-      golpear(im.c, im.cuerpo, im.vel, im.f.id);
-      clavar(im.f, im.punto, im.cuerpo.transformNode);
+      const f = im.f;
+      if (f.clavada || !flechas.has(f)) continue;
+      if (im.pared) {
+        if (f.explosion) explotar(im.punto, f.explosion, "x" + f.id + "p");
+        clavar(f, im.punto, null);
+        continue;
+      }
+      if (!corredores.includes(im.c) || im.c.intangible || im.c.bolasVistas.has("g" + f.id)) continue;
+      golpear(im.c, im.cuerpo, im.vel, f.id);
+      if (f.explosion) explotar(im.punto, f.explosion, "x" + f.id + "_" + aplastados);
+      if (f.perfora > 0 && f.agg) {                     // perforante: sigue de largo
+        f.perfora--;
+        f.agg.body.setLinearVelocity(im.vel);
+        continue;
+      }
+      clavar(f, im.punto, im.cuerpo.transformNode);
     }
   });
 
   // ---------- Controles (mouse y táctil) ----------
-  // Mouse: clic izq. mantener = cargar, soltar = disparar · clic der. arrastrar = cámara
-  // Táctil: mantener dedo = cargar (puedes arrastrar para apuntar), soltar = disparar
-  //         botón 🎥 = modo cámara (1 dedo gira, 2 dedos zoom)
   const POT_MIN = 10, POT_MAX = 100, T_CARGA = 1.2;
   let cargando = false, tCarga = 0, dedo = null, modoCamara = false;
   const toques = new Set();
@@ -766,11 +946,14 @@ window.addEventListener("error", e => msg("Error: " + e.message));
     return Math.round(POT_MIN + (POT_MAX - POT_MIN) * k * (2 - k));
   };
   const mostrarPotencia = v => {
-    slider.value = v; fv.textContent = v;
-    const col = colorPotencia(v).toHexString();
+    slider.value = v;
+    const titan = v >= POT_MAX && PODERES.nivelTitan > 0;
+    fv.textContent = titan ? v + " 👑" : v;
+    const col = titan ? "#ffcc22" : colorPotencia(v).toHexString();
     fv.style.color = col;
     mira.style.borderColor = col;
-    const s = 70 - 40 * (v - POT_MIN) / (POT_MAX - POT_MIN);   // la mira se cierra al cargar
+    mira.style.boxShadow = titan ? "0 0 14px 4px #ffcc22" : "0 0 0 2px rgba(0,0,0,.4)";
+    const s = 70 - 40 * (v - POT_MIN) / (POT_MAX - POT_MIN);
     mira.style.width = mira.style.height = s + "px";
   };
   const moverMira = e => {
@@ -793,30 +976,29 @@ window.addEventListener("error", e => msg("Error: " + e.message));
 
   canvas.addEventListener("pointerdown", e => {
     if (e.pointerType === "touch") toques.add(e.pointerId);
-    if (toques.size > 1) { cancelar(); return; }                  // 2 dedos = gesto, no disparo
+    if (toques.size > 1) { cancelar(); return; }
     if (modoCamara || !jugando || e.button !== 0 || cargando) return;
     cargando = true; tCarga = 0; dedo = e.pointerId;
     mostrarPotencia(POT_MIN);
     if (e.pointerType !== "mouse") { moverMira(e); mira.style.display = "block"; }
   });
   window.addEventListener("pointermove", e => { if (cargando && e.pointerId === dedo) moverMira(e); });
-  const fin = e => {
+  window.addEventListener("pointerup", e => {
     toques.delete(e.pointerId);
     if (!cargando || e.pointerId !== dedo) return;
     const r = canvas.getBoundingClientRect();
-    const px = e.clientX - r.left, py = e.clientY - r.top;   // px CSS (Babylon aplica el escalado)
+    const px = e.clientX - r.left, py = e.clientY - r.top;
     const pot = potenciaActual();
     cancelar();
     disparar(pot, px, py);
-  };
-  window.addEventListener("pointerup", fin);
+  });
   window.addEventListener("pointercancel", e => { toques.delete(e.pointerId); if (e.pointerId === dedo) cancelar(); });
   window.addEventListener("blur", cancelar);
   document.addEventListener("visibilitychange", () => { if (document.hidden) cancelar(); });
 
   scene.onBeforeRenderObservable.add(() => {
     if (!cargando) return;
-    tCarga += Math.min(engine.getDeltaTime() / 1000, 0.05);
+    tCarga += Math.min(engine.getDeltaTime() / 1000, 0.05) * PODERES.factorCarga();
     mostrarPotencia(potenciaActual());
   });
 

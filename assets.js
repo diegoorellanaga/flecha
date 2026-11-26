@@ -1,12 +1,12 @@
 // assets.js — Mapa y decoración de "Resiste a los ragdolls".
-// Solo visual (sin lógica de juego). Usa un RNG propio con semilla fija,
-// así el mapa se ve igual para todos.
+// Solo visual (sin lógica de juego). RNG propio con semilla fija: el mapa es igual para todos.
 window.MAPA = (() => {
   const CFG = {
     puertasZ: [-9, -3, 3, 9],   // 4 puertas en la pared izquierda
     xPuertas: -15,
     xMeta: 13.5,
-    cielo: "#8cc8f5"
+    cielo: "#8cc8f5",
+    castillo: { x: 21, z: 0 }  // castillo detrás de la meta
   };
 
   function rng(seed) {   // mulberry32
@@ -34,6 +34,7 @@ window.MAPA = (() => {
       Object.assign(m, opt);
       return m;
     };
+    const fijo = m => { m.isPickable = false; m.freezeWorldMatrix(); return m; };
     const r = rng(777);
 
     // ---------- Cielo ----------
@@ -55,7 +56,6 @@ window.MAPA = (() => {
     mCielo.emissiveTexture = txCielo; mCielo.disableLighting = true; mCielo.fogEnabled = false;
     domo.material = mCielo; domo.isPickable = false;
 
-    // Nubes: esferas blancas aplastadas
     const mNube = mat("mNube", "#ffffff", { emissiveColor: new B.Color3(0.85, 0.85, 0.9), fogEnabled: false });
     const nubeBase = B.MeshBuilder.CreateSphere("nube", { diameter: 1, segments: 6 }, scene);
     nubeBase.material = mNube; nubeBase.isPickable = false; nubeBase.isVisible = false;
@@ -83,7 +83,7 @@ window.MAPA = (() => {
         ctx.fillStyle = i % 2 ? "#5f9c45" : "#6aab4d";
         ctx.fillRect(i * w / franjas, 0, w / franjas, h);
       }
-      for (let i = 0; i < 2500; i++) {               // ruido de pasto
+      for (let i = 0; i < 2500; i++) {
         ctx.fillStyle = r() < 0.5 ? "rgba(40,80,30,.25)" : "rgba(150,200,110,.2)";
         ctx.fillRect(r() * w, r() * h, 2, 3);
       }
@@ -94,7 +94,6 @@ window.MAPA = (() => {
     exterior.position.y = -0.05; exterior.isPickable = false;
     exterior.material = mat("mExterior", "#4f8a3c");
 
-    // Tierra frente a cada puerta
     const mTierra = mat("mTierra", "#8a6a45");
     CFG.puertasZ.forEach((z, i) => {
       const t = B.MeshBuilder.CreateDisc("tierra" + i, { radius: 1.8, tessellation: 20 }, scene);
@@ -117,31 +116,38 @@ window.MAPA = (() => {
     });
     txPiedra.uScale = 6; txPiedra.vScale = 1.5;
     const mPiedra = mat("mPiedra", "#ffffff", { diffuseTexture: txPiedra });
-    const mVidrio = mat("mVidrio", "#bfe3ff", { alpha: 0.18 });
-    // pared0: fondo (z=+15) · pared1: frente (z=-15, la cámara mira a través) · pared2: derecha · pared3: izquierda (puertas)
+    // pared0: fondo (z=+15) · pared1: frente (z=-15) · pared2: derecha · pared3: izquierda (puertas)
     ["pared0", "pared2", "pared3"].forEach(nm => { const p = scene.getMeshByName(nm); if (p) p.material = mPiedra; });
-    const frente = scene.getMeshByName("pared1"); if (frente) frente.material = mVidrio;
+
+    // La pared del frente (la más cercana a la cámara) se elimina: tapaba la vista y frenaba las flechas
+    const frente = scene.getMeshByName("pared1");
+    if (frente) {
+      if (frente.physicsBody) { frente.physicsBody.shape?.dispose(); frente.physicsBody.dispose(); }
+      frente.dispose();
+    }
+    // En su lugar, un borde bajo de piedra solo decorativo (sin física)
+    const borde = B.MeshBuilder.CreateBox("bordeFrente", { width: 30.5, height: 0.35, depth: 0.4 }, scene);
+    borde.position.set(0, 0.17, -15.1); borde.material = mPiedra; fijo(borde);
 
     // ---------- Puertas ----------
     const mMarco = mat("mMarco", "#5a4632");
     const puertas = CFG.puertasZ.map((z, i) => {
       const x = CFG.xPuertas + 0.3;
-      const poste = (dz) => {
+      const poste = dz => {
         const p = B.MeshBuilder.CreateBox("poste", { width: 0.6, height: 3.4, depth: 0.5 }, scene);
-        p.position.set(x, 1.7, z + dz); p.material = mMarco; p.isPickable = false;
+        p.position.set(x, 1.7, z + dz); p.material = mMarco; fijo(p);
       };
       poste(-1.25); poste(1.25);
       const din = B.MeshBuilder.CreateBox("dintel", { width: 0.7, height: 0.5, depth: 3.1 }, scene);
-      din.position.set(x, 3.55, z); din.material = mMarco; din.isPickable = false;
+      din.position.set(x, 3.55, z); din.material = mMarco; fijo(din);
       const portal = B.MeshBuilder.CreatePlane("portal", { width: 2.0, height: 3.2,
         sideOrientation: B.Mesh.DOUBLESIDE }, scene);
       portal.rotation.y = Math.PI / 2; portal.position.set(x + 0.02, 1.6, z); portal.isPickable = false;
       const mP = mat("mPortal" + i, "#120a1e", { emissiveColor: new B.Color3(0.15, 0.05, 0.25) });
       portal.material = mP;
-      // antorchas
       [-1.25, 1.25].forEach(dz => {
         const fuego = B.MeshBuilder.CreateSphere("fuego", { diameter: 0.25, segments: 6 }, scene);
-        fuego.position.set(x + 0.4, 3.0, z + dz); fuego.isPickable = false;
+        fuego.position.set(x + 0.4, 3.0, z + dz); fijo(fuego);
         fuego.material = mat("mFuego", "#ffb030", { emissiveColor: new B.Color3(1, 0.55, 0.1), disableLighting: true });
       });
       return { x: CFG.xPuertas + 0.8, z, mat: mP, brillo: 0 };
@@ -163,27 +169,32 @@ window.MAPA = (() => {
     const mBandera = mat("mBandera", "#e02020", { backFaceCulling: false });
     [-14.3, 14.3].forEach(z => {
       const m = B.MeshBuilder.CreateCylinder("mastil", { height: 4, diameter: 0.12 }, scene);
-      m.position.set(CFG.xMeta, 2, z); m.material = mMastil; m.isPickable = false;
+      m.position.set(CFG.xMeta, 2, z); m.material = mMastil; fijo(m);
       const b = B.MeshBuilder.CreatePlane("bandera", { width: 1.2, height: 0.7 }, scene);
-      b.position.set(CFG.xMeta + 0.6, 3.6, z); b.material = mBandera; b.isPickable = false;
+      b.position.set(CFG.xMeta + 0.6, 3.6, z); b.material = mBandera; fijo(b);
     });
 
-    // ---------- Árboles y rocas fuera de la arena ----------
+    // ---------- Castillo detrás de la meta (lo que defiendes) ----------
+    crearCastillo(scene, B, mat, fijo, mPiedra, CFG.castillo.x, CFG.castillo.z);
+
+    // ---------- Árboles y rocas ----------
     const mTronco = mat("mTronco", "#6b4a2b"), mHoja = mat("mHoja", "#2f7a3a"), mHoja2 = mat("mHoja2", "#3d8f45");
     const tronco = B.MeshBuilder.CreateCylinder("tronco", { height: 1.6, diameterTop: 0.35, diameterBottom: 0.5, tessellation: 6 }, scene);
     const copa1 = B.MeshBuilder.CreateCylinder("copa1", { height: 2.6, diameterTop: 0, diameterBottom: 2.6, tessellation: 7 }, scene);
     const copa2 = B.MeshBuilder.CreateCylinder("copa2", { height: 2.0, diameterTop: 0, diameterBottom: 2.0, tessellation: 7 }, scene);
     tronco.material = mTronco; copa1.material = mHoja; copa2.material = mHoja2;
-    const mRoca = mat("mRoca", "#8d8f96");
     const roca = B.MeshBuilder.CreateSphere("roca", { diameter: 1, segments: 4 }, scene);
-    roca.material = mRoca;
+    roca.material = mat("mRoca", "#8d8f96");
     for (const base of [tronco, copa1, copa2, roca]) { base.isVisible = false; base.isPickable = false; }
 
-    let puestos = 0;
-    while (puestos < 55) {
+    const libre = (x, z, margen) =>
+      (Math.abs(x) < 17 + margen && Math.abs(z) < 17 + margen) ||          // arena
+      (z < -16 && Math.abs(x) < 30 && z > -34) ||                          // delante de la cámara
+      (x > 15 && x < 31 && Math.abs(z) < 15);                              // castillo
+    let puestos = 0, intentos = 0;
+    while (puestos < 55 && intentos++ < 2000) {
       const x = (r() * 2 - 1) * 60, z = (r() * 2 - 1) * 60;
-      if (Math.abs(x) < 19 && Math.abs(z) < 19) continue;          // fuera de la arena
-      if (z < -16 && Math.abs(x) < 30 && z > -32) continue;         // no tapar la cámara
+      if (libre(x, z, 2)) continue;
       const s = 0.8 + r() * 0.8;
       const t = tronco.createInstance("t"); t.position.set(x, 0.8 * s, z); t.scaling.setAll(s);
       const c1 = copa1.createInstance("c1"); c1.position.set(x, 2.6 * s, z); c1.scaling.setAll(s);
@@ -193,7 +204,7 @@ window.MAPA = (() => {
     }
     for (let i = 0; i < 30; i++) {
       const x = (r() * 2 - 1) * 45, z = (r() * 2 - 1) * 45;
-      if (Math.abs(x) < 17 && Math.abs(z) < 17) continue;
+      if (libre(x, z, 0)) continue;
       const k = roca.createInstance("r"); k.isPickable = false;
       k.position.set(x, 0.1, z); k.scaling.set(0.6 + r() * 1.4, 0.4 + r() * 0.7, 0.6 + r() * 1.4);
       k.rotation.y = r() * 6;
@@ -213,6 +224,65 @@ window.MAPA = (() => {
         }
       }
     };
+  }
+
+  // Torre principal + 2 torres laterales + muralla almenada + portón. Todo decorativo (sin física).
+  function crearCastillo(scene, B, mat, fijo, mPiedra, cx, cz) {
+    const mTecho = mat("mTecho", "#9c2a22");
+    const mOscuro = mat("mPorton", "#2a1c12");
+    const mVentana = mat("mVentana", "#ffd27a", { emissiveColor: new B.Color3(0.8, 0.55, 0.2) });
+    const mBanderaC = mat("mBanderaC", "#1f4fbf", { backFaceCulling: false });
+
+    const almenas = (x, y, z, radio, n, alto = 0.7) => {
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const b = B.MeshBuilder.CreateBox("almena", { width: 0.6, height: alto, depth: 0.6 }, scene);
+        b.position.set(x + Math.cos(a) * radio, y + alto / 2, z + Math.sin(a) * radio);
+        b.rotation.y = -a; b.material = mPiedra; fijo(b);
+      }
+    };
+    const torre = (x, z, radio, alto, techo = true) => {
+      const t = B.MeshBuilder.CreateCylinder("torre", { height: alto, diameter: radio * 2, tessellation: 16 }, scene);
+      t.position.set(x, alto / 2, z); t.material = mPiedra; fijo(t);
+      const anillo = B.MeshBuilder.CreateCylinder("anillo", { height: 0.4, diameter: radio * 2 + 0.5, tessellation: 16 }, scene);
+      anillo.position.set(x, alto + 0.2, z); anillo.material = mPiedra; fijo(anillo);
+      almenas(x, alto + 0.4, z, radio + 0.1, Math.round(radio * 4));
+      // ventanas encendidas mirando a la arena
+      for (let h = 2.5; h < alto - 1; h += 2.5) {
+        const v = B.MeshBuilder.CreatePlane("ventana", { width: 0.45, height: 0.8 }, scene);
+        v.position.set(x - radio - 0.01, h, z); v.rotation.y = Math.PI / 2; v.material = mVentana; fijo(v);
+      }
+      if (techo) {
+        const c = B.MeshBuilder.CreateCylinder("techo", { height: radio * 1.8, diameterTop: 0, diameterBottom: radio * 2 + 0.7, tessellation: 16 }, scene);
+        c.position.set(x, alto + 0.4 + radio * 0.9 + 0.35, z); c.material = mTecho; fijo(c);
+        return alto + 0.75 + radio * 1.8;
+      }
+      return alto + 1.1;
+    };
+
+    // Muralla con almenas entre las torres laterales
+    const largo = 16;
+    const muro = B.MeshBuilder.CreateBox("muralla", { width: 1.2, height: 5, depth: largo }, scene);
+    muro.position.set(cx - 2.5, 2.5, cz); muro.material = mPiedra; fijo(muro);
+    for (let z = -largo / 2 + 0.4; z <= largo / 2 - 0.4; z += 1.1) {
+      const b = B.MeshBuilder.CreateBox("almenaMuro", { width: 1.3, height: 0.7, depth: 0.55 }, scene);
+      b.position.set(cx - 2.5, 5.35, cz + z); b.material = mPiedra; fijo(b);
+    }
+    // Portón con arco
+    const porton = B.MeshBuilder.CreatePlane("porton", { width: 2.6, height: 3.2 }, scene);
+    porton.position.set(cx - 3.11, 1.6, cz); porton.rotation.y = Math.PI / 2; porton.material = mOscuro; fijo(porton);
+    const arco = B.MeshBuilder.CreateCylinder("arco", { height: 0.05, diameter: 2.6, tessellation: 16, arc: 0.5 }, scene);
+    arco.position.set(cx - 3.12, 3.2, cz); arco.rotation.set(0, 0, Math.PI / 2); arco.material = mOscuro; fijo(arco);
+
+    torre(cx - 2.5, cz - largo / 2, 1.6, 7);
+    torre(cx - 2.5, cz + largo / 2, 1.6, 7);
+    const cima = torre(cx + 1.5, cz, 2.6, 12);            // torre del homenaje
+
+    // Bandera en lo alto
+    const mastil = B.MeshBuilder.CreateCylinder("mastilC", { height: 2.5, diameter: 0.1 }, scene);
+    mastil.position.set(cx + 1.5, cima + 1.2, cz); mastil.material = mat("mMastilC", "#dddddd"); fijo(mastil);
+    const bandera = B.MeshBuilder.CreatePlane("banderaC", { width: 1.6, height: 0.9 }, scene);
+    bandera.position.set(cx + 1.5 - 0.8, cima + 2, cz); bandera.material = mBanderaC; fijo(bandera);
   }
 
   return { CFG, crear };

@@ -3,8 +3,9 @@
 (() => {
   const ANIMACIONES = [
     // archivo                          ms = duración si no se puede leer del GIF
-    { src: "princesa_gameover.gif",       ms: 3000 },
-    { src: "princesa_caida_retro.gif", ms: 3000 }   // también sirve una imagen fija
+    { src: "princesa_gameover.gif",       ms: 4000 },
+    { src: "princesa_cielo_retro.gif",       ms: 4000 },
+    { src: "princesa_caida_retro.gif", ms: 4000 }   // también sirve una imagen fija
   ];
   const ELEGIR = "azar";      // "azar" = una distinta cada vez · "orden" = una tras otra
   const SALTAR_CON_TOQUE = true;
